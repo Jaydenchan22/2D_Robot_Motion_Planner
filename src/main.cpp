@@ -2,65 +2,36 @@
 #include <vector>
 #include "planner/state.hpp"
 #include "planner/environment.hpp"
-#include "planner/astar_planner.hpp"
+#include "planner/rrt_planner.hpp"
 
 int main() {
     std::cout << "=====================================\n";
-    std::cout << "   2D Motion Planner Initialized     \n";
+    std::cout << "     RRT Motion Planner Test        \n";
     std::cout << "=====================================\n";
 
-    // 1. Setup a 10x10 environment with a wall
-    Environment env(20,30);
-    for (int y = 0; y <= 14; ++y) {
-        env.setObstacle(4, y);
-    }
-    for (int x = 2; x <= 15; ++x) {
-        env.setObstacle(x, 14);
+    // 1. Setup Environment with a central wall
+    Environment env(20, 20);
+    for (int y = 3; y <= 11; ++y) {
+        env.setObstacle(7, y);
     }
 
-    // 2. Define Start (Left side) and Goal (Right side)
-    Point2D start{1.0, 5.0};
-    Point2D goal{13.0, 5.0};
+    Point2D start{2.0, 7.0};
+    Point2D goal{12.0, 7.0};
 
-    // 3. Run the A* Planner
-    AStarPlanner planner;
-    std::cout << "\nPlanning path with A*...\n";
+    // 2. Initialize RRT Planner
+    RRTPlanner planner(1, 10000, 0.1); // max_iter, step_size, goal_bias
+    std::cout << "Planning path with RRT...\n";
+    
     std::vector<Point2D> path = planner.plan(start, goal, env);
 
-    // 4. Output the results
+    // 3. Print Results
     if (path.empty()) {
-        std::cout << "FAILED: No valid path found around obstacles!\n";
+        std::cout << "FAILED: No path found within iteration limit!\n";
     } else {
-        std::cout << "SUCCESS! Path found with " << path.size() << " waypoints.\n";
-        
-        // Render map with path overlay
-        std::cout << "\n--- Path Visualization (* = Robot Path) ---\n";
-        for (int y = 0; y < env.getHeight(); ++y) {
-            for (int x = 0; x < env.getWidth(); ++x) {
-                // Check if this cell is part of the path
-                bool is_path = false;
-                for (const auto& pt : path) {
-                    if (static_cast<int>(pt.x) == x && static_cast<int>(pt.y) == y) {
-                        is_path = true;
-                        break;
-                    }
-                }
-
-                if (static_cast<int>(start.x) == x && static_cast<int>(start.y) == y) {
-                    std::cout << "(S) "; // Start
-                } else if (static_cast<int>(goal.x) == x && static_cast<int>(goal.y) == y) {
-                    std::cout << "(G) "; // Goal
-                } else if (is_path) {
-                    std::cout << " *  "; // Planned Path
-                } else if (!env.isValid(x, y)) {
-                    std::cout << "[#] "; // Obstacle Wall
-                } else {
-                    std::cout << " .  "; // Free Space
-                }
-            }
-            std::cout << "\n";
+        std::cout << "SUCCESS! RRT path found with " << path.size() << " continuous waypoints:\n";
+        for (size_t i = 0; i < path.size(); ++i) {
+            std::cout << "  Waypoint [" << i << "]: (" << path[i].x << ", " << path[i].y << ")\n";
         }
-        std::cout << "----------------------------------------------------------\n";
     }
 
     return 0;
