@@ -15,7 +15,9 @@ enum class PlannerMode {
 
 int main() {
     //  Setup Map Environment (20x15 grid with walls)
-    Environment env(20, 20);
+    int grid_width = 20;
+    int grid_height = 15;
+    Environment env(grid_width, grid_height);
 
     // for (int y = 2; y <= 12; ++y) env.setObstacle(7, y);  // First wall
     // for (int y = 0; y <= 10; ++y) env.setObstacle(14, y); // Second wall
@@ -25,35 +27,68 @@ int main() {
 
     // Instantiate Both Planners
     AStarPlanner astar_planner;
-    RRTPlanner rrt_planner(0.6, 3000, 0.08); // step_size=0.6, max_iter=3000, goal_bias=0.08
+    RRTPlanner rrt_planner(0.6, 5000, 0.05); // step_size=0.6, max_iter=3000, goal_bias=0.08
 
     // Initialize both planners
     astar_planner.init(start, goal, env);
     rrt_planner.init(start, goal, env);
 
     PlannerMode current_mode = PlannerMode::ASTAR;
-    bool is_paused = false;
+    bool is_paused = true;
 
     // Initialize Raylib Window
     int cell_size = 40;
+    SetConfigFlags(FLAG_WINDOW_RESIZABLE);
     InitWindow(env.getWidth() * cell_size, env.getHeight() * cell_size, "2D Motion Planner - Dual Mode (A* & RRT)");
     SetTargetFPS(60);
 
     // Main Raylib Loop
     while (!WindowShouldClose()) {
+        
+        //cell size adjust
+        cell_size = std::min(GetScreenWidth() / env.getWidth(), GetScreenHeight() / env.getHeight());
+        if (cell_size < 1) cell_size = 1;
+
         //  KEYBOARD CONTROLS 
         if (IsKeyPressed(KEY_ONE)) {
             current_mode = PlannerMode::ASTAR;
             astar_planner.init(start, goal, env); // Reset A* on switch
+            is_paused = false;
         }
         if (IsKeyPressed(KEY_TWO)) {
             current_mode = PlannerMode::RRT;
             rrt_planner.init(start, goal, env);   // Reset RRT on switch
+            is_paused = false;
         }
         if (IsKeyPressed(KEY_SPACE)) {
             is_paused = !is_paused;
         }
         if (IsKeyPressed(KEY_R)) {
+            if (current_mode == PlannerMode::ASTAR) astar_planner.init(start, goal, env);
+            else rrt_planner.init(start, goal, env);
+            is_paused = true;
+        }
+
+        // RESIZE ENVIRONMENT CONTROLS
+        bool resize_triggered = false;
+        if (IsKeyPressed(KEY_UP)) { grid_height++; resize_triggered = true; }
+        if (IsKeyPressed(KEY_DOWN) && grid_height > 5) { grid_height--; resize_triggered = true; }
+        if (IsKeyPressed(KEY_RIGHT)) { grid_width++; resize_triggered = true; }
+        if (IsKeyPressed(KEY_LEFT) && grid_width > 5) { grid_width--; resize_triggered = true; }
+
+        if (resize_triggered) {
+            // Re-create the environment with new dimensions
+            env = Environment(grid_width, grid_height);
+
+            // Clamp start and goal points so they don't fall outside the new window
+            if (start.x >= grid_width) start.x = grid_width - 1.0;
+            if (start.y >= grid_height) start.y = grid_height - 1.0;
+            if (goal.x >= grid_width) goal.x = grid_width - 1.0;
+            if (goal.y >= grid_height) goal.y = grid_height - 1.0;
+
+            
+
+            // Reset the active planner
             if (current_mode == PlannerMode::ASTAR) astar_planner.init(start, goal, env);
             else rrt_planner.init(start, goal, env);
         }
@@ -62,24 +97,41 @@ int main() {
         // Left Click = Draw Wall, Right Click = Erase Wall
         if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) || IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) {
             
-            // Convert screen pixel coordinates to grid coordinates
             int grid_x = GetMouseX() / cell_size;
             int grid_y = GetMouseY() / cell_size;
 
-            // Ensure we aren't clicking outside the window
             if (grid_x >= 0 && grid_x < env.getWidth() && grid_y >= 0 && grid_y < env.getHeight()) {
-                
-                // Prevent placing walls directly on top of the Start or Goal dots
-                if (!(grid_x == (int)start.x && grid_y == (int)start.y) && 
-                    !(grid_x == (int)goal.x && grid_y == (int)goal.y)) {
-                    
-                    if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
-                        env.setObstacle(grid_x, grid_y);
-                    } else if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) {
-                        env.removeObstacle(grid_x, grid_y);
-                    }
+                bool state_changed = false;
 
-                    // Force the planner to restart its search when the map changes
+                // Move Start Point
+                if (IsKeyDown(KEY_S) && IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+                    start = {(double)grid_x, (double)grid_y};
+                    env.removeObstacle(grid_x, grid_y); // Prevent getting trapped in a wall
+                    state_changed = true;
+                }
+                // Move Goal Point
+                else if (IsKeyDown(KEY_E) && IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+                    goal = {(double)grid_x, (double)grid_y};
+                    env.removeObstacle(grid_x, grid_y);
+                    state_changed = true;
+                }
+                // Draw/Erase Walls
+                else {
+                    if (!(grid_x == (int)start.x && grid_y == (int)start.y) && 
+                        !(grid_x == (int)goal.x && grid_y == (int)goal.y)) {
+                        
+                        if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+                            env.setObstacle(grid_x, grid_y);
+                            state_changed = true;
+                        } else if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) {
+                            env.removeObstacle(grid_x, grid_y);
+                            state_changed = true;
+                        }
+                    }
+                }
+
+                // Restart search if the map or points changed
+                if (state_changed) {
                     if (current_mode == PlannerMode::ASTAR) astar_planner.init(start, goal, env);
                     else rrt_planner.init(start, goal, env);
                 }
@@ -190,18 +242,20 @@ int main() {
         DrawCircleV(g, 12.0f, RED);
 
         // HUD & Status Information
-       DrawText("1: A* |  2: RRT  |  SPACE: Pause  |  R: Reset", 10, 10, 18, BLACK);
-        DrawText("Left Click: Draw Wall  |  Right Click: Erase Wall", 10, 35, 18, DARKGRAY);
+        DrawText("1: A* | 2: RRT | SPACE: Pause | R: Reset", 10, 10, 18, BLACK);
+        DrawText("Left Click: Draw Wall | Right Click: Erase", 10, 35, 18, DARKGRAY);
+        DrawText("Hold 'S' + Click: Set Start | Hold 'G' + Click: Set Goal", 10, 60, 18, DARKGRAY);
+        DrawText("Arrow Keys: Resize Map", 10, 85, 18, DARKGRAY);
 
         if (current_mode == PlannerMode::ASTAR) {
-            DrawText("Active: A*", 10, 60, 18, DARKBLUE);
+            DrawText("Active: A*", 10, 115, 18, DARKBLUE);
             if (astar_planner.getStatus() == SearchStatus::FOUND) {
-                DrawText("STATUS: PATH FOUND!", 10, 85, 20, DARKGREEN);
+                DrawText("STATUS: PATH FOUND!", 10, 140, 20, DARKGREEN);
             }
         } else {
-            DrawText("Active: RRT", 10, 60, 18, DARKBLUE);
+            DrawText("Active: RRT", 10, 115, 18, DARKBLUE);
             if (rrt_planner.getStatus() == RRTStatus::FOUND) {
-                DrawText("STATUS: PATH FOUND!", 10, 85, 20, DARKGREEN);
+                DrawText("STATUS: PATH FOUND!", 10, 140, 20, DARKGREEN);
             }
         }
 
