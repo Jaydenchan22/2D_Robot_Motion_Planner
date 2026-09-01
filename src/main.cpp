@@ -14,15 +14,16 @@ enum class PlannerMode {
 };
 
 int main() {
-    // 1. Setup Map Environment (20x15 grid with walls)
-    Environment env(20, 15);
-    for (int y = 2; y <= 12; ++y) env.setObstacle(7, y);  // First wall
-    for (int y = 0; y <= 10; ++y) env.setObstacle(14, y); // Second wall
+    //  Setup Map Environment (20x15 grid with walls)
+    Environment env(20, 20);
+
+    // for (int y = 2; y <= 12; ++y) env.setObstacle(7, y);  // First wall
+    // for (int y = 0; y <= 10; ++y) env.setObstacle(14, y); // Second wall
 
     Point2D start{2.0, 7.0};
     Point2D goal{18.0, 7.0};
 
-    // 2. Instantiate Both Planners
+    // Instantiate Both Planners
     AStarPlanner astar_planner;
     RRTPlanner rrt_planner(0.6, 3000, 0.08); // step_size=0.6, max_iter=3000, goal_bias=0.08
 
@@ -33,14 +34,14 @@ int main() {
     PlannerMode current_mode = PlannerMode::ASTAR;
     bool is_paused = false;
 
-    // 3. Initialize Raylib Window
+    // Initialize Raylib Window
     int cell_size = 40;
     InitWindow(env.getWidth() * cell_size, env.getHeight() * cell_size, "2D Motion Planner - Dual Mode (A* & RRT)");
     SetTargetFPS(60);
 
-    // 4. Main Raylib Loop
+    // Main Raylib Loop
     while (!WindowShouldClose()) {
-        // --- KEYBOARD CONTROLS ---
+        //  KEYBOARD CONTROLS 
         if (IsKeyPressed(KEY_ONE)) {
             current_mode = PlannerMode::ASTAR;
             astar_planner.init(start, goal, env); // Reset A* on switch
@@ -57,7 +58,35 @@ int main() {
             else rrt_planner.init(start, goal, env);
         }
 
-        // --- STEP SEARCH FORWARD ---
+        //customize obsticles
+        // Left Click = Draw Wall, Right Click = Erase Wall
+        if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) || IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) {
+            
+            // Convert screen pixel coordinates to grid coordinates
+            int grid_x = GetMouseX() / cell_size;
+            int grid_y = GetMouseY() / cell_size;
+
+            // Ensure we aren't clicking outside the window
+            if (grid_x >= 0 && grid_x < env.getWidth() && grid_y >= 0 && grid_y < env.getHeight()) {
+                
+                // Prevent placing walls directly on top of the Start or Goal dots
+                if (!(grid_x == (int)start.x && grid_y == (int)start.y) && 
+                    !(grid_x == (int)goal.x && grid_y == (int)goal.y)) {
+                    
+                    if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+                        env.setObstacle(grid_x, grid_y);
+                    } else if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) {
+                        env.removeObstacle(grid_x, grid_y);
+                    }
+
+                    // Force the planner to restart its search when the map changes
+                    if (current_mode == PlannerMode::ASTAR) astar_planner.init(start, goal, env);
+                    else rrt_planner.init(start, goal, env);
+                }
+            }
+        }
+
+        // STEP SEARCH FORWARD 
         if (!is_paused) {
             if (current_mode == PlannerMode::ASTAR && astar_planner.getStatus() == SearchStatus::SEARCHING) {
                 astar_planner.step(env);
@@ -72,7 +101,7 @@ int main() {
             }
         }
 
-        // --- RENDER ---
+        // RENDER 
         BeginDrawing();
         ClearBackground(RAYWHITE);
 
@@ -89,7 +118,7 @@ int main() {
             }
         }
 
-        // B. Mode Specific Rendering
+        // Mode Specific Rendering
         std::vector<Point2D> current_path;
 
         if (current_mode == PlannerMode::ASTAR) {
@@ -143,7 +172,7 @@ int main() {
             }
         }
 
-        // C. Draw Solved Path (Common to both)
+        //Draw Solved Path (Common to both)
         if (current_path.size() > 1) {
             for (size_t i = 0; i < current_path.size() - 1; ++i) {
                 Vector2 p1 = {(float)(current_path[i].x * cell_size + cell_size / 2.0),
@@ -154,24 +183,25 @@ int main() {
             }
         }
 
-        // D. Draw Start and Goal Points
+        // Draw Start and Goal Points
         Vector2 s = {(float)(start.x * cell_size + cell_size / 2.0), (float)(start.y * cell_size + cell_size / 2.0)};
         Vector2 g = {(float)(goal.x * cell_size + cell_size / 2.0), (float)(goal.y * cell_size + cell_size / 2.0)};
         DrawCircleV(s, 12.0f, GREEN);
         DrawCircleV(g, 12.0f, RED);
 
-        // E. HUD & Status Information
-        DrawText("1: A* Mode  |  2: RRT Mode  |  SPACE: Pause  |  R: Reset", 10, 10, 18, BLACK);
+        // HUD & Status Information
+       DrawText("1: A* |  2: RRT  |  SPACE: Pause  |  R: Reset", 10, 10, 18, BLACK);
+        DrawText("Left Click: Draw Wall  |  Right Click: Erase Wall", 10, 35, 18, DARKGRAY);
 
         if (current_mode == PlannerMode::ASTAR) {
-            DrawText("Active Planner: A* (Grid Search)", 10, 35, 18, DARKBLUE);
+            DrawText("Active: A*", 10, 60, 18, DARKBLUE);
             if (astar_planner.getStatus() == SearchStatus::FOUND) {
-                DrawText("STATUS: PATH FOUND!", 10, 60, 20, DARKGREEN);
+                DrawText("STATUS: PATH FOUND!", 10, 85, 20, DARKGREEN);
             }
         } else {
-            DrawText("Active Planner: RRT (Sampling Tree)", 10, 35, 18, DARKBLUE);
+            DrawText("Active: RRT", 10, 60, 18, DARKBLUE);
             if (rrt_planner.getStatus() == RRTStatus::FOUND) {
-                DrawText("STATUS: PATH FOUND!", 10, 60, 20, DARKGREEN);
+                DrawText("STATUS: PATH FOUND!", 10, 85, 20, DARKGREEN);
             }
         }
 
