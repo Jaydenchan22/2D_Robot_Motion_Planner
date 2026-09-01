@@ -2,11 +2,8 @@
 #include <cmath>
 #include <algorithm>
 
-// Constructor: Notice the order matches your new header, and we seed rng_ here!
 RRTPlanner::RRTPlanner(double step_size, int max_iterations, double goal_bias)
     : step_size_(step_size), max_iterations_(max_iterations), goal_bias_(goal_bias) {
-    
-    // Seed the class-member random number generator once when the planner is created
     std::random_device rd;
     rng_.seed(rd());
 }
@@ -32,7 +29,7 @@ int RRTPlanner::getNearestNodeIndex(const std::vector<RRTNode>& tree, const Poin
 Point2D RRTPlanner::steer(const Point2D& from, const Point2D& to) const {
     double dist = getDistance(from, to);
     if (dist <= step_size_) {
-        return to; // If it's already close enough, just return the target point
+        return to;
     }
     double angle = std::atan2(to.y - from.y, to.x - from.x);
     return {from.x + step_size_ * std::cos(angle), from.y + step_size_ * std::sin(angle)};
@@ -40,9 +37,7 @@ Point2D RRTPlanner::steer(const Point2D& from, const Point2D& to) const {
 
 bool RRTPlanner::isPathClear(const Point2D& from, const Point2D& to, const Environment& env) const {
     double dist = getDistance(from, to);
-    int steps = static_cast<int>(std::ceil(dist / 0.1)); 
-    
-    // Protect against division by zero if from and to are the exact same point
+    int steps = static_cast<int>(std::ceil(dist / 0.1));
     if (steps == 0) return true;
 
     double dx = (to.x - from.x) / steps;
@@ -61,66 +56,83 @@ bool RRTPlanner::isPathClear(const Point2D& from, const Point2D& to, const Envir
     return true;
 }
 
-std::vector<Point2D> RRTPlanner::plan(const Point2D& start, const Point2D& goal, const Environment& env) {
-    // 1. Boundary / Invalid Start Check
+//Initialize Planner State for animation
+void RRTPlanner::init(const Point2D& start, const Point2D& goal, const Environment& env) {
+    start_ = start;
+    goal_ = goal;
+    tree_.clear();
+    path_.clear();
+    current_iteration_ = 0;
+
     if (!env.isValid(static_cast<int>(start.x), static_cast<int>(start.y)) ||
         !env.isValid(static_cast<int>(goal.x), static_cast<int>(goal.y))) {
-        return {};
+        status_ = RRTStatus::FAILED;
+        return;
     }
 
-    // 2. Initialize Tree
-    std::vector<RRTNode> tree;
-    tree.push_back({start, -1}); // Root node has no parent (-1)
+    tree_.push_back({start_, -1}); // Add start node
+    status_ = RRTStatus::SEARCHING;
+}
 
-    // Setup distributions for random point generation
+// 2. Perform ONE step of RRT per frame call
+RRTStatus RRTPlanner::step(const Environment& env) {
+    if (status_ != RRTStatus::SEARCHING) return status_;
+
+    if (current_iteration_ >= max_iterations_) {
+        status_ = RRTStatus::FAILED;
+        return status_;
+    }
+
+    current_iteration_++;
+
+    //Sample point
     std::uniform_real_distribution<double> bias_dist(0.0, 1.0);
-    std::uniform_real_distribution<double> x_dist(0.0, static_cast<double>(env.getWidth() - 1));
-    std::uniform_real_distribution<double> y_dist(0.0, static_cast<double>(env.getHeight() - 1));
+    std::uniform_real_distribution<double> x_dist(0.0, static_cast<double>(env.getWidth() - 1.001));
+    std::uniform_real_distribution<double> y_dist(0.0, static_cast<double>(env.getHeight() - 1.001));
 
-    // 3. Main RRT Loop
-    for (int iter = 0; iter < max_iterations_; ++iter) {
-        
-        // --- STEP A: Random Sample ---
-        Point2D q_rand;
-        if (bias_dist(rng_) < goal_bias_) { // Notice we pass rng_ here
-            q_rand = goal;
-        } else {
-            q_rand = {x_dist(rng_), y_dist(rng_)};
-        }
+    if (bias_dist(rng_) < goal_bias_) {
+        q_rand_ = goal_;
+    } else {
+        q_rand_ = {x_dist(rng_), y_dist(rng_)};
+    }
 
-        // --- STEP B: Nearest Neighbor ---
-        int nearest_idx = getNearestNodeIndex(tree, q_rand);
-        Point2D q_near = tree[nearest_idx].point;
+    // B. Nearest node
+    int nearest_idx = getNearestNodeIndex(tree_, q_rand_);
+    Point2D q_near = tree_[nearest_idx].point;
 
-        // --- STEP C: Steer ---
-        Point2D q_new = steer(q_near, q_rand);
+    // C. Steer
+    q_new_ = steer(q_near, q_rand_);
 
-        // --- STEP D: Collision Check ---
-        if (isPathClear(q_near, q_new, env)) {
-            tree.push_back({q_new, nearest_idx}); // Add to tree!
-            int new_node_idx = static_cast<int>(tree.size()) - 1;
+    // D. Collision Check
+    if (isPathClear(q_near, q_new_, env)) {
+        tree_.push_back({q_new_, nearest_idx});
+        int new_node_idx = static_cast<int>(tree_.size()) - 1;
 
-            // --- STEP E: Check if Goal Reached ---
-            if (getDistance(q_new, goal) <= step_size_) {
-                if (isPathClear(q_new, goal, env)) {
-                    
-                    // Connect final node to the goal
-                    tree.push_back({goal, new_node_idx});
-                    
-                    // Reconstruct path going backwards
-                    std::vector<Point2D> path;
-                    int curr = static_cast<int>(tree.size()) - 1;
-                    while (curr != -1) {
-                        path.push_back(tree[curr].point);
-                        curr = tree[curr].parent_index; // Jump to parent
-                    }
-                    std::reverse(path.begin(), path.end()); // Flip it from Start->Goal
-                    
-                    return path;
+        // E. Goal check
+        if (getDistance(q_new_, goal_) <= step_size_) {
+            if (isPathClear(q_new_, goal_, env)) {
+                tree_.push_back({goal_, new_node_idx});
+
+                // Reconstruct Path
+                int curr = static_cast<int>(tree_.size()) - 1;
+                while (curr != -1) {
+                    path_.push_back(tree_[curr].point);
+                    curr = tree_[curr].parent_index;
                 }
+                std::reverse(path_.begin(), path_.end());
+                status_ = RRTStatus::FOUND;
             }
         }
     }
 
-    return {}; // No path found after max_iterations_
+    return status_;
+}
+
+//Batch plan fallback
+std::vector<Point2D> RRTPlanner::plan(const Point2D& start, const Point2D& goal, const Environment& env) {
+    init(start, goal, env);
+    while (status_ == RRTStatus::SEARCHING) {
+        step(env);
+    }
+    return path_;
 }
